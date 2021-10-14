@@ -293,7 +293,7 @@ class Timer:
                 _LOGGER.debug(f"Starte Timer {self._timeout}s.")
                 await asyncio.sleep(self._timeout)
                 self._in_callback = True
-                _LOGGER.debug("Calling timeout callback...")
+                _LOGGER.info("Calling timeout callback...")
                 await self._callback()
                 _LOGGER.debug("Timeout callback finished!")
             except asyncio.exceptions.CancelledError:
@@ -309,7 +309,7 @@ class Timer:
 
     def _cancel(self):
         if self._in_callback:
-            raise Exception("Timedout too late to cancel, to find cancel!")
+            raise Exception("Timedout too late to cancel!")
         if self._task is not None:
             self._task.cancel()
     
@@ -331,6 +331,7 @@ class PhilipsGenericCoAPFanBase(PhilipsGenericFan):
         self._connecting_timeout = Timer(20, self.stopConnectingAttempt, False)
 
         self._connect_task = None
+        self._reconnect_time = 1
 
         self._preset_modes = []
         self._available_preset_modes = {}
@@ -370,7 +371,7 @@ class PhilipsGenericCoAPFanBase(PhilipsGenericFan):
     async def init(self) -> None:
         while True:
             try:
-                _LOGGER.debug("Connecting to AirPurifier...")
+                _LOGGER.info("Connecting to AirPurifier...")
                 self._connecting_timeout.reset()
                 self._connect_task = asyncio.ensure_future(self.init_connection())
                 await self._connect_task
@@ -381,8 +382,11 @@ class PhilipsGenericCoAPFanBase(PhilipsGenericFan):
                 self._timer.start()
                 return
             except:
+                self._device_status = None
+                self.schedule_update_ha_state()
                 _LOGGER.exception("init_connection(): Exception!")
-                await asyncio.sleep(30)
+                await asyncio.sleep(self._reconnect_time)
+                self._reconnect_time = 60 if self._reconnect_time > 60 else self._reconnect_time * 1.5
         
 
     def _collect_available_preset_modes(self):

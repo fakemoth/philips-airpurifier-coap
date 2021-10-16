@@ -327,7 +327,7 @@ class PhilipsGenericCoAPFanBase(PhilipsGenericFan):
     def __init__(self, host: str, model: str, name: str, icon: str) -> None:
         super().__init__(host, model, name, icon)
         self._device_status = None
-        self._timer: Timer = Timer(67, self.reset_connection, False) # Maybe use response.opts.max_age field here, instead of hardcoding?
+        self._timer: Timer = Timer(70, self.reset_connection, False) # Maybe use response.opts.max_age field here, instead of hardcoding?
         self._connecting_timeout = Timer(20, self.stopConnectingAttempt, False)
 
         self._connect_task = None
@@ -346,15 +346,18 @@ class PhilipsGenericCoAPFanBase(PhilipsGenericFan):
             _LOGGER.debug("Try to cancel connect......")
             self._connect_task.cancel()
 
-    async def reset_connection(self):
-        await self.init()
+    async def reset_connection(self, endIt=False):
         try:
-            self._observer_task.cancel()
-            await self._observer_task
-            await self._client.shutdown()
+            if self._observer_task is not None:
+                self._observer_task.cancel()
+                await self._observer_task
+            if self._client is not None:
+                await self._client.shutdown()
         except:
             _LOGGER.exception("Reset Connection: Cleanup of old connection failed!")
-        await self.async_added_to_hass()
+        if not endIt:
+            await self.init()
+            await self.async_added_to_hass()
 
     async def init_connection(self):
         self._client = await CoAPClient.create(self._host)
@@ -381,9 +384,12 @@ class PhilipsGenericCoAPFanBase(PhilipsGenericFan):
                 _LOGGER.debug("Starte Oberservation Timeout...")
                 self._timer.start()
                 return
+            except asyncio.exceptions.CancelledError:
+                pass # We got cancelled, return immediately
             except:
-                self._device_status = None
-                self.schedule_update_ha_state()
+                if self._device_status is not None:
+                    self._device_status = None
+                    self.schedule_update_ha_state()
                 _LOGGER.exception("init_connection(): Exception!")
                 await asyncio.sleep(self._reconnect_time)
                 self._reconnect_time = 60 if self._reconnect_time > 60 else self._reconnect_time * 1.5
@@ -408,9 +414,7 @@ class PhilipsGenericCoAPFanBase(PhilipsGenericFan):
         self._observer_task = asyncio.create_task(self._observe_status())
 
     async def async_will_remove_from_hass(self) -> None:
-        self._observer_task.cancel()
-        await self._observer_task
-        await self._client.shutdown()
+        await self.reset_connection(endIt=True)
 
     async def _observe_status(self) -> None:
         async for status in self._client.observe_status():

@@ -350,7 +350,10 @@ class PhilipsGenericCoAPFanBase(PhilipsGenericFan):
         try:
             if self._observer_task is not None:
                 self._observer_task.cancel()
-                await self._observer_task
+                try:
+                    await self._observer_task
+                except asyncio.exceptions.CancelledError:
+                    pass # Silently ignore, because we cancelled 4 lines above
             if self._client is not None:
                 await self._client.shutdown()
         except:
